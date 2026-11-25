@@ -23,7 +23,7 @@ Search any listed Canadian forecast place, an ECCC place ID, or latitude, longit
 
 Choosing a place sends its ID/coordinates to ECCC. Map tiles come from OpenStreetMap for the visible area. Browser location is requested only after the visitor presses **Use my location**. Places and limits are saved in `coolcode:weatherwindow:places` and `coolcode:weatherwindow:limits` local storage, not cookies or a server account. **Clear saved places** removes the saved-place list; limits can be changed in the form. Private browsing or clearing site storage removes preferences. The shared CoolCode counter records aggregate opens only.
 
-ECCC data is attributed under its [data licence](https://eccc-msc.github.io/open-data/licence/readme_en/). The map attributes OpenStreetMap contributors. Leaflet 1.9.4 is vendored only for the interactive map; its licence is in `web/vendor/LICENSE`. No build or production npm dependency is needed.
+Application code is MIT licensed; upstream data and the vendored map library keep their original terms. ECCC data is attributed under its [data licence](https://eccc-msc.github.io/open-data/licence/readme_en/). The map attributes OpenStreetMap contributors. Leaflet 1.9.4 is vendored only for the interactive map; its licence is in `web/vendor/LICENSE`. No build or production npm dependency is needed.
 
 ## Expand or customize
 
