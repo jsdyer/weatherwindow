@@ -1,37 +1,46 @@
-import { cleanLines } from './model.mjs';
-const input = document.querySelector('#input');
-const output = document.querySelector('#output');
-const status = document.querySelector('#status');
-const copy = document.querySelector('#copy');
-function update() {
-  const result = cleanLines(input.value);
-  output.value = result.text;
-  status.textContent = `${result.count} unique ${result.count === 1 ? 'line' : 'lines'}; ${result.removed} ${result.removed === 1 ? 'duplicate' : 'duplicates'} removed.`;
-  copy.disabled = result.count === 0;
+import {weather,findPlace,nearest,observations,newestForecast,relevantAlerts,windows,windowStatus,ageLabel,thresholds} from './model.mjs';
+const $=id=>document.getElementById(id),node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;},key='coolcode:weatherwindow:';
+const fmt=(v,s='')=>v===null||v===undefined?'Unavailable':`${v}${s}`;
+const date=t=>Number.isFinite(Date.parse(t))?new Date(t).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'Time unavailable';
+function stored(name,fallback){try{return JSON.parse(localStorage.getItem(key+name))??fallback;}catch{return fallback;}}
+function persist(name,value){try{localStorage.setItem(key+name,JSON.stringify(value));return true;}catch{$('status').textContent='Browser storage is unavailable; this selection stays in this tab only.';return false;}}
+const config=await (await fetch('./config.json')).json();
+let limits=config.thresholds;try{limits=thresholds(stored('limits',limits));}catch{}
+for(const [k,v] of Object.entries(limits))$(k).value=v;
+let places=[],selected=null,board=null,generation=0,saved=stored('places',[]),map=null,layers=null;
+if(!Array.isArray(saved))saved=[];
+saved=saved.filter(p=>typeof p?.id==='string'&&typeof p?.name==='string'&&Number.isFinite(p?.lat)&&Number.isFinite(p?.lon));
+async function json(url){const r=await fetch(url,{signal:AbortSignal.timeout(config.timeout_ms),headers:{Accept:'application/geo+json,application/json'}});if(!r.ok)throw Error(`ECCC request returned ${r.status}`);return r.json();}
+async function collection(url,maxPages=1){const features=[];for(let i=0;i<maxPages;i++){const d=await json(url);if(!Array.isArray(d.features))throw Error('Unexpected ECCC collection');features.push(...d.features);const next=d.links?.find(l=>l.rel==='next')?.href;if(!next){if(Number.isFinite(d.numberMatched)&&features.length<d.numberMatched)throw Error('Incomplete ECCC collection');return features;}if(i===maxPages-1)throw Error('Response exceeds the displayed coverage limit');const u=new URL(next,url);if(u.origin!==new URL(config.api_base).origin)throw Error('Unexpected collection pagination');url=u.href;}return features;}
+function api(name,params){const u=new URL(`${name}/items`,config.api_base);for(const [k,v] of Object.entries({f:'json',...params}))u.searchParams.set(k,v);return u.href;}
+function sourceLink(label,url){const a=node('a',label);try{const u=new URL(url);if(u.protocol==='https:'&&u.hostname.endsWith('weather.gc.ca'))a.href=u.href;}catch{}return a;}
+function renderSaved(){const group=$('saved');group.replaceChildren();if(saved.length)group.append(node('span','Saved:'));for(const p of saved){const b=node('button',p.name);b.addEventListener('click',()=>choose(p));group.append(b);}$('save').textContent=saved.some(p=>p.id===selected?.id)?'Remove saved place':'Save this place';}
+function renderMap(){if(!window.L||!selected)return;if(!map){map=L.map('map').setView([selected.lat,selected.lon],8);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · ECCC data',maxZoom:16}).addTo(map);layers=L.layerGroup().addTo(map);}layers.clearLayers();map.setView([selected.lat,selected.lon],8);L.circleMarker([selected.lat,selected.lon],{radius:8,color:'#163c46',fillColor:'#fff',fillOpacity:1,weight:3}).bindPopup(node('strong',selected.name)).addTo(layers);
+ for(const a of board?.alerts?.data||[])L.geoJSON(a,{style:{color:a.properties.risk_colour_en==='red'?'#a31d25':'#ca811f',weight:2,fillOpacity:.12},onEachFeature:(f,l)=>l.bindPopup(node('p',`${f.properties.alert_name_en} · ${f.properties.feature_name_en}`))}).addTo(layers);
+ for(const a of (board?.aqhi?.data||[]).map(a=>({...a,distance:Math.hypot(a.lat-selected.lat,a.lon-selected.lon)})).filter(a=>a.distance<4))L.circleMarker([a.lat,a.lon],{radius:7,color:'#146e78',fillOpacity:.8}).bindPopup(node('p',`${a.name}: AQHI ${fmt(a.aqhi)} · ${date(a.at)}`)).addTo(layers);
 }
-input.addEventListener('input', update);
-document.querySelector('#sample').addEventListener('click', () => {
-  input.value = '  Halifax\nLangley\nHalifax\n\nVancouver  ';
-  update();
-});
-document.querySelector('#clear').addEventListener('click', () => {
-  input.value = '';
-  update();
-  input.focus();
-});
-if (navigator.clipboard && window.isSecureContext) {
-  copy.hidden = false;
-  copy.disabled = true;
-  copy.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(output.value);
-      status.textContent = 'Result copied.';
-    } catch {
-      output.focus();
-      output.select();
-      status.textContent = 'Copy was unavailable. The result is selected so you can copy it manually.';
-    }
-  });
-}
-// Namespace future preference storage as coolcode:<tool-id>:<key>.
-// Do not persist pasted text or uploads by default.
+function renderHours(){const w=board?.city?.data;$('hours').replaceChildren();$('windows').replaceChildren();if(!w){$('window-status').textContent='An hourly forecast is not available.';return;}const hours=w.hours.filter(h=>Date.parse(h.at)>=Date.now()-60_000);$('hourly-date').textContent=`Hourly forecast source time: ${date(w.hourly_at)} · ${ageLabel(w.hourly_at,1080)}. Displayed hours use your device timezone.`;const blocks=windows(w.hours,limits);for(const b of blocks)$('windows').append(node('span',`${date(b.start)}${b.hours>1?' – '+date(b.end):''} · ${b.hours} hourly point${b.hours===1?'':'s'}`,'window'));
+ $('window-status').textContent=blocks.length?`${blocks.length} matching stretch${blocks.length===1?'':'es'} in the available hourly forecast. Check alerts and air quality separately.`:hours.length?'No available hours match all your limits. Unknown readings do not count as matches.':'No future hourly forecast is available.';
+ for(const h of hours){const status=windowStatus(h,limits),tr=node('tr',undefined,status);for(const text of [date(h.at),h.condition||'Unavailable',fmt(h.temperature),fmt(h.wind)+(h.gust===null?'':' / '+h.gust),fmt(h.pop),status==='match'?'Matches limits':status==='unknown'?'Unknown inputs':'Outside limits'])tr.append(node('td',text));$('hours').append(tr);}}
+function render(){if(!selected||!board)return;$('selected').textContent=selected.name;let note=`${selected.province} · ${selected.lat.toFixed(2)}, ${selected.lon.toFixed(2)}`;if(selected.forecast_name)note+=` · Nearest forecast place: ${selected.forecast_name} (${Math.round(selected.distance)} km away)`;$('place-note').textContent=note;
+ $('conditions').replaceChildren();const w=board.city?.data;const card=(title,value,note)=>{const c=node('article',undefined,'card');c.append(node('span',title),node('strong',value),node('small',note));$('conditions').append(c);};
+ if(w){card('Observed temperature',fmt(w.temperature,'°C'),`${w.condition||'Condition unavailable'} · ${w.station||'Station unavailable'}`);card('Observed wind',fmt(w.wind,' km/h'),`Gust ${fmt(w.gust,' km/h')} · humidity ${fmt(w.humidity,'%')}`);card('Observation time',date(w.observed_at),ageLabel(w.observed_at,config.observation_stale_minutes));if(w.feels!==null)card('Feels like',fmt(w.feels,'°C'),'Source wind chill or humidex');}
+ else card('Current weather','Unavailable',board.city?.error||'Waiting for source');
+ $('forecast').replaceChildren();$('forecast-date').textContent=w?`Issued ${date(w.forecast_at)} · ${ageLabel(w.forecast_at,2880)} · retrieved ${date(board.city.fetched)}`:'Forecast unavailable';for(const f of w?.forecasts||[]){const article=node('article',undefined,'forecast-item');article.append(node('h3',f.period),node('p',f.text));$('forecast').append(article);}if(w?.url)$('forecast').append(sourceLink('Open this place on weather.gc.ca',w.url));
+ const a=board.aqhi?.data?nearest(board.aqhi.data,selected):null;const near=a&&a.distance<=config.aqhi_max_distance_km;$('air').replaceChildren();$('air-status').textContent=board.aqhi?.error?`AQHI request failed. ${board.aqhi.data?'Previously fetched readings remain below.':'No current observation available.'}`:'AQHI observations are regional readings; they are not measured at your address.';
+ if(near){$('air').append(node('h3',`AQHI ${fmt(a.aqhi)}`),node('p',`${a.name} · ${Math.round(a.distance)} km from this point`),node('p',`${date(a.at)} · ${ageLabel(a.at,config.observation_stale_minutes)}`));if(a.notes)$('air').append(node('p',a.notes));}else $('air').append(node('p',a?`No suggested observation within ${config.aqhi_max_distance_km} km. Nearest reporting location: ${a.name}, ${Math.round(a.distance)} km away.`:'No AQHI observation available.'));if(selected.province==='QC')$('air').append(node('p','Quebec observation data are not published through this federal AQHI feed. Nearby readings from another province do not represent your location.'));
+ $('air-forecast').replaceChildren();const af=board.airForecast?.data;if(af){$('air-forecast').append(node('p',`${af.location_name_en} · issued ${date(af.publication_datetime)} · ${ageLabel(af.publication_datetime,1440)}`));for(const p of Object.values(af.forecast_period))$('air-forecast').append(node('p',`${p.forecast_period_en}: AQHI ${fmt(p.aqhi)}${p.aqhi_insmoke!==null&&p.aqhi_insmoke!==undefined?' · in smoke '+p.aqhi_insmoke:''}`));}else $('air-forecast').append(node('p',board.airForecast?.error||'No nearby AQHI forecast period is available.'));
+ $('alerts').replaceChildren();const matched=relevantAlerts(board.alerts?.data||[],selected);$('alert-status').textContent=board.alerts?.error?`Alert request failed. ${board.alerts.data?'Previously fetched alert areas remain visible; they may have changed.':'Alert status is unknown.'}`:board.alerts?`${matched.length} active alert area${matched.length===1?'':'s'} contain this point · retrieved ${date(board.alerts.fetched)}. Nearby polygons are also shown on the map.`:'Checking official alert areas…';for(const f of matched){const p=f.properties,detail=node('details',undefined,'alert');detail.open=true;detail.append(node('summary',`${p.alert_name_en} · ${p.feature_name_en}${p.risk_colour_en?' · '+p.risk_colour_en:''}`),node('p',`Published ${date(p.publication_datetime)} · expires ${date(p.expiration_datetime)} · ${p.status_en||''}`),node('pre',p.alert_text_en||'Read the official alert on weather.gc.ca.'));$('alerts').append(detail);}
+ renderHours();renderSaved();renderMap();}
+async function choose(place){selected=place;$('place').value=place.forecast_id?`${place.lat}, ${place.lon}`:`${place.name}, ${place.province}`;renderSaved();await load();}
+async function load(){if(!selected)return;const n=++generation,p=selected;const old=board?.id===p.id?board:null;board=old||{id:p.id};$('status').textContent='Checking weather, air quality and official alerts…';$('refresh').disabled=true;render();const box=[Math.max(-180,p.lon-1),Math.max(-90,p.lat-1),Math.min(180,p.lon+1),Math.min(90,p.lat+1)].join(',');
+ const tasks={city:()=>json(new URL(`citypageweather-realtime/items/${encodeURIComponent(p.forecast_id||p.id)}?f=json`,config.api_base)).then(f=>{if(f?.properties?.identifier!==(p.forecast_id||p.id))throw Error('ECCC returned a different forecast place');return weather(f);}),aqhi:()=>collection(api('aqhi-observations-realtime',{latest:'true',limit:1000}),2).then(observations),alerts:()=>collection(api('weather-alerts',{bbox:box,limit:100}),config.alert_page_limit).then(features=>{for(const f of features){if(!['Polygon','MultiPolygon'].includes(f.geometry?.type)||typeof f.properties?.alert_name_en!=='string'||typeof f.properties?.alert_text_en!=='string')throw Error('Unexpected alert geometry or text schema');}return features;})};
+ await Promise.all(Object.entries(tasks).map(async([name,fn])=>{try{const value=await fn();if(n===generation)board[name]={data:value,fetched:new Date().toISOString()};}catch(e){if(n===generation)board[name]={...board[name],error:e.message};}}));if(n!==generation)return;
+ const near=board.aqhi?.data?nearest(board.aqhi.data,p):null;if(near&&near.distance<=config.aqhi_max_distance_km){try{const features=await json(api('aqhi-forecasts-realtime',{location_id:near.id,aqhi_type:'AQHI-Forecast-Period',sortby:'-publication_datetime',limit:4}));if(n===generation)board.airForecast={data:newestForecast(features.features||[]),fetched:new Date().toISOString()};}catch(e){if(n===generation)board.airForecast={...board.airForecast,error:'AQHI forecast request failed; retained values, if shown, keep their original issue time.'};}}else board.airForecast={data:null};if(n!==generation)return;
+ const failures=Object.values(board).filter(x=>x?.error).length;$('status').textContent=failures?`${failures} source request${failures===1?'':'s'} failed. Available or retained values keep their original source times.`:`Sources retrieved ${date(new Date().toISOString())}. Source issue and observation times are shown separately.`;$('refresh').disabled=false;render();}
+$('place-form').addEventListener('submit',e=>{e.preventDefault();try{choose(findPlace($('place').value,places));}catch(e){$('status').textContent=e.message;}});
+$('threshold-form').addEventListener('submit',e=>{e.preventDefault();try{limits=thresholds(Object.fromEntries(Object.keys(config.thresholds).map(k=>[k,$(k).value])));persist('limits',limits);renderHours();}catch(e){$('window-status').textContent=e.message;}});
+$('save').addEventListener('click',()=>{if(!selected)return;saved=saved.some(p=>p.id===selected.id)?saved.filter(p=>p.id!==selected.id):[...saved,selected];persist('places',saved);renderSaved();});
+$('clear-saved').addEventListener('click',()=>{saved=[];persist('places',saved);renderSaved();});$('refresh').addEventListener('click',load);
+$('locate').addEventListener('click',()=>{if(!navigator.geolocation){$('status').textContent='Location is unavailable; enter coordinates or a city.';return;}navigator.geolocation.getCurrentPosition(pos=>{try{choose(findPlace(`${pos.coords.latitude.toFixed(4)},${pos.coords.longitude.toFixed(4)}`,places));}catch(e){$('status').textContent=e.message;}},()=>{$('status').textContent='Location was unavailable or permission was declined. Choose a city instead.';},{timeout:10000,maximumAge:300000});});
+try{const catalogue=await (await fetch('./data/catalog.json')).json();places=catalogue.places;for(const p of places){const o=node('option');o.value=`${p.name}, ${p.province}`;o.label=`${p.id} · ${p.name_fr}`;$('places').append(o);}$('directory').textContent=`${places.length} official ECCC forecast places · directory checked ${date(catalogue.checked_at)}. Coordinates select the nearest forecast place.`;for(const id of config.presets){const p=places.find(p=>p.id===id);if(p){const b=node('button',`${p.name}, ${p.province}`);b.addEventListener('click',()=>choose(p));$('presets').append(b);}}const health=await (await fetch('./data/source-health.json')).json();$('health').textContent=`Automated source access check: ${date(health.checked_at)}. This checks API availability, not the age of today's weather.`;const params=new URLSearchParams(location.search);let start=saved[0]||places.find(p=>p.id===config.default_place)||places[0];if(params.has('lat')&&params.has('lon')){try{start=findPlace(`${params.get('lat')},${params.get('lon')}`,places);}catch{}}else if(params.has('place')){try{start=findPlace(params.get('place'),places);}catch{}}await choose(start);}catch(e){$('status').textContent='The place directory could not be loaded. Reload or use the official weather links below.';}

@@ -1,21 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanLines } from '../web/model.mjs';
-test('trims, removes blanks and preserves first-seen order', () => {
-  assert.deepEqual(cleanLines('  Halifax\nLangley\nHalifax\n\nVancouver  '), {
-    text: 'Halifax\nLangley\nVancouver', count: 3, removed: 1,
-  });
-});
-test('supports Windows and old Mac line endings', () => {
-  assert.equal(cleanLines('a\r\nb\ra').text, 'a\nb');
-});
-test('empty text and whitespace produce an empty result', () => {
-  assert.deepEqual(cleanLines(' \n\t'), { text: '', count: 0, removed: 0 });
-});
-test('preserves case and Unicode', () => {
-  assert.equal(cleanLines('Québec\nquébec\n東京\nQuébec').text, 'Québec\nquébec\n東京');
-});
-test('treats markup as ordinary text', () => {
-  assert.equal(cleanLines('<script>alert(1)</script>\n<script>alert(1)</script>').text, '<script>alert(1)</script>');
-});
-test('rejects non-text input', () => { assert.throws(() => cleanLines(null), TypeError); });
+import {readFileSync} from 'node:fs';
+import {weather,findPlace,nearest,windowStatus,windows,pointInGeometry,relevantAlerts,newestForecast,ageLabel,thresholds} from '../web/model.mjs';
+const fixture=JSON.parse(readFileSync(new URL('./fixtures/city.json',import.meta.url)));
+test('real ECCC nested city response preserves observations, forecasts and source dates',()=>{const w=weather(fixture);assert.equal(w.id,'ns-19');assert.equal(w.temperature,-3.6);assert.equal(w.wind,28);assert.ok(w.hours.length>12);assert.equal(w.observed_at,'2026-11-25T07:00:00Z');assert.notEqual(w.forecast_at,w.observed_at);assert.ok(w.forecasts[0].text);});
+test('missing hourly values stay unknown rather than zero',()=>{const limits={min_temp:0,max_temp:25,max_wind:20,max_pop:30};assert.equal(windowStatus({temperature:10,wind:5,gust:null,pop:null},limits),'unknown');assert.equal(windowStatus({temperature:10,wind:5,gust:30,pop:0},limits),'outside');assert.equal(windowStatus({temperature:10,wind:5,gust:null,pop:0},limits),'match');});
+test('only consecutive future matching hourly points form a window',()=>{const limits={min_temp:0,max_temp:25,max_wind:20,max_pop:30};const hours=[0,1,2,4].map(i=>({at:`2026-11-25T0${i}:00:00Z`,temperature:10,wind:5,pop:0}));const w=windows(hours,limits,Date.parse('2026-11-25T01:00:00Z'));assert.equal(w.length,2);assert.equal(w[0].hours,2);});
+test('polygon holes and multipolygons determine alert coverage',()=>{const g={type:'Polygon',coordinates:[[[0,0],[10,0],[10,10],[0,10],[0,0]],[[2,2],[3,2],[3,3],[2,3],[2,2]]]};assert.equal(pointInGeometry([1,1],g),true);assert.equal(pointInGeometry([2.5,2.5],g),false);assert.equal(pointInGeometry([1,1],{type:'MultiPolygon',coordinates:[g.coordinates]}),true);assert.equal(relevantAlerts([{geometry:g,properties:{expiration_datetime:'2020-01-01'}}],{lon:1,lat:1}).length,0);});
+test('new places beyond presets work and coordinate lookup keeps the selected point',()=>{const rows=[{id:'on-83',name:'Deep River',name_fr:'Deep River',province:'ON',lat:46.1,lon:-77.49}];assert.equal(findPlace('Deep River, ON',rows).id,'on-83');const p=findPlace('46.2, -77.5',rows);assert.equal(p.forecast_id,'on-83');assert.equal(p.lat,46.2);assert.ok(p.distance>0);assert.equal(nearest(rows,p).id,'on-83');assert.throws(()=>findPlace('0,0',rows));});
+test('AQHI newest publication is selected independently of response order',()=>{const f=t=>({properties:{publication_datetime:t,forecast_period:{}}});assert.equal(newestForecast([f('2026-11-24'),f('2026-11-25')]).publication_datetime,'2026-11-25');assert.match(ageLabel('2026-11-23',180,Date.parse('2026-11-25')),/STALE/);});
+test('invalid thresholds are rejected',()=>{assert.throws(()=>thresholds({min_temp:25,max_temp:0,max_wind:20,max_pop:30}));});

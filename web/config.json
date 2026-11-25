@@ -1,0 +1,11 @@
+{
+  "default_place": "ns-19",
+  "presets": ["ns-19", "pe-5", "bc-74", "on-143", "qc-147", "nt-24", "nu-21", "yt-16"],
+  "api_base": "https://api.weather.gc.ca/collections/",
+  "timeout_ms": 20000,
+  "alert_page_limit": 8,
+  "aqhi_max_distance_km": 100,
+  "observation_stale_minutes": 180,
+  "thresholds": {"min_temp": 5, "max_temp": 27, "max_wind": 25, "max_pop": 30},
+  "catalogue_url": "https://api.weather.gc.ca/collections/citypageweather-realtime/items?f=json&limit=1000&properties=identifier,name.en,name.fr"
+}

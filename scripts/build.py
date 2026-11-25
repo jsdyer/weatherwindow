@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build a browser tool using Python's standard library; no network required."""
 from html import escape
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -42,6 +43,32 @@ def metadata(root=ROOT):
     return tool
 
 
+
+def version_assets(stage):
+    """Give the whole local asset graph one deterministic cache version."""
+    digest = hashlib.sha256()
+    for path in sorted(stage.rglob("*")):
+        if path.is_file():
+            digest.update(path.relative_to(stage).as_posix().encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+    version = digest.hexdigest()[:16]
+
+    def local_reference(match):
+        quote, relative = match.group(1), match.group(2)
+        target = stage / relative.removeprefix("./")
+        if target.is_file() and target.suffix in {".mjs", ".js", ".css", ".json"}:
+            return f"{quote}{relative}?v={version}{quote}"
+        return match.group(0)
+
+    # Version imports and config fetches together, so an updated app never imports
+    # a still-fresh cached module from the previous release.
+    references = re.compile(r"([\"'])(\./[^\"'?]+)\1")
+    for path in [stage / "index.html", *stage.glob("*.mjs")]:
+        path.write_text(references.sub(local_reference, path.read_text(encoding="utf-8")), encoding="utf-8")
+    return version
+
+
 def build(root=ROOT):
     tool = metadata(root)
     output = root / "dist"
@@ -77,6 +104,7 @@ def build(root=ROOT):
             raise ValueError("Unresolved template placeholder in web/index.html")
         page = add_search_metadata(page, tool)
         index.write_text(page, encoding="utf-8")
+        version_assets(stage)
         (stage / ".nojekyll").touch()
         if output.exists():
             shutil.rmtree(output)

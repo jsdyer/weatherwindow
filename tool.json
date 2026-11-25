@@ -1,16 +1,23 @@
 {
-  "id": "coolcode-tool-template",
-  "title": "CoolCode Tool Starter",
-  "description": "A browser-only example that trims lines and removes exact duplicates.",
-  "category": "security",
-  "tags": ["text", "lines", "duplicates"],
-  "icon": "scan-search",
-  "url": "/coolcode-tool-template/",
-  "source": "https://github.com/jsdyer/coolcode-tool-template",
+  "id": "weatherwindow",
+  "title": "Weather Window",
+  "description": "Find your next outdoor window with Canadian weather, hourly forecasts, air quality and official alert areas.",
+  "category": "places",
+  "tags": [
+    "weather",
+    "air quality",
+    "Canada",
+    "alerts",
+    "outdoors"
+  ],
+  "icon": "map",
+  "url": "/weatherwindow/",
+  "source": "https://github.com/jsdyer/weatherwindow",
   "hosting": "project",
   "access": "browser",
   "data_info": {
-    "mode": "local",
-    "detail": "The browser reads the text you paste and compares its lines."
+    "mode": "live",
+    "detail": "Official ECCC current weather, hourly and text forecasts, AQHI and alert polygons for Canadian places.",
+    "cadence": "Live on demand; daily source checks"
   }
 }
